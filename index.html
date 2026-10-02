@@ -20,7 +20,9 @@ h1{font-size:22px;font-weight:900;margin:0;letter-spacing:.04em}
 .stat b{color:var(--ink);font-size:18px}
 .board{background:var(--paper);border:2px solid var(--ink);border-radius:4px;padding:0;line-height:0;
  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:30px 30px}
-canvas{width:100%;height:auto;aspect-ratio:1;display:block;cursor:crosshair;touch-action:manipulation}
+canvas{width:100%;height:auto;aspect-ratio:1;display:block;cursor:crosshair;touch-action:none}
+.row button{flex:1;min-height:52px}
+button:disabled{opacity:.35;cursor:default}
 .msg{min-height:84px;padding:14px 2px 6px;line-height:1.6}
 .msg .big{font-size:26px;font-weight:900}
 .msg .small{color:var(--sub);font-size:14px}
@@ -42,12 +44,11 @@ button:focus-visible{outline:3px solid var(--guess);outline-offset:2px}
 
  <section id="start" class="panel">
   <p>文字や図形の「重心」だと思う場所をクリック。1ピクセルずれるごとに1点減点されます（1問100点満点・全5問）。</p>
-  <p class="stat">級は5問の平均ズレで決まります：2px以内で神級、4px・8px・12px・20px以内で達人・上級・中級・初級。</p>
   <p class="stat">重心とは、形を指の先で支えたときにつり合う点のこと。</p>
   <div class="row" style="flex-direction:column;align-items:stretch">
-   <button data-mode="easy">Easy　1文字・単純な図形</button>
-   <button data-mode="normal" class="alt">Normal　言葉・複合図形</button>
-   <button data-mode="hard" class="alt">Hard　2〜3行の文章・模様（中央から外れる）</button>
+   <button data-mode="easy">Easy</button>
+   <button data-mode="normal" class="alt">Normal</button>
+   <button data-mode="hard" class="alt">Hard</button>
   </div>
   <p class="stat" id="best" style="margin:14px 0 0"></p>
  </section>
@@ -56,7 +57,8 @@ button:focus-visible{outline:3px solid var(--guess);outline-offset:2px}
   <div class="legend"><span><i class="dot" style="background:var(--guess)"></i>あなたの予想</span><span><i class="dot" style="background:var(--truth)"></i>本当の重心</span></div>
   <div class="board"><canvas id="cv" width="360" height="360" aria-label="重心を当てるキャンバス"></canvas></div>
   <div class="msg" id="msg"></div>
-  <div class="row"><button id="next" class="hidden">次の問題</button></div>
+  <div class="row"><button id="guess" disabled>Guess</button>
+   <button id="next" class="hidden">次の問題</button></div>
  </section>
 
  <section id="end" class="panel hidden">
@@ -77,7 +79,7 @@ const CH=[...'永森愛鬱乙火書国山龍あアKRGaテ区才麗襲彎ぬを�
 const WORDS=['重心','東京タワー','ありがとう','Centroid','寿限無寿限無','カレーライス','Hello World','猫と犬','鬱蒼','サンドイッチ','ガチャガチャ','Fukuoka','博多ラーメン','balance','天気予報','パピプペポ'];
 const FONT='"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP","Yu Gothic",sans-serif';
 const MN={easy:'Easy',normal:'Normal',hard:'Hard'};
-let mode='easy',round=0,total=0,target=null,answered=false,dists=[],cent=null;
+let pending=null,mode='easy',round=0,total=0,target=null,answered=false,dists=[],cent=null;
 const rnd=(a,b)=>a+Math.random()*(b-a);
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -155,6 +157,7 @@ function render(guess){
   ctx.clearRect(0,0,S,S);
   target.draw(ctx,css('--ink'));
   if(!guess)return;
+  if(!answered){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(guess.x,guess.y,10,0,7);ctx.fill();ctx.fillStyle=css('--guess');ctx.beginPath();ctx.arc(guess.x,guess.y,7,0,7);ctx.fill();return;}
   ctx.lineWidth=2;ctx.strokeStyle=css('--line');ctx.setLineDash([5,4]);
   ctx.beginPath();ctx.moveTo(guess.x,guess.y);ctx.lineTo(cent.x,cent.y);ctx.stroke();ctx.setLineDash([]);
   ctx.strokeStyle='#fff';ctx.lineWidth=5;cross(cent);ctx.strokeStyle=css('--truth');ctx.lineWidth=3;cross(cent);
@@ -166,17 +169,24 @@ function stat(){$('stat').innerHTML=`${MN[mode]}　第<b>${Math.min(round+1,ROUN
 function newRound(){
   const text=Math.random()<.5;
   target=mode==='hard'?(text?makeExtremeText():makeExtremeShape()):mode==='normal'?(text?makeHardText():makeHardShape()):(text?makeText():makeShape());cent=centroid(target);answered=false;
-  $('msg').innerHTML='<div class="big">どこが重心？</div><div class="small">思う場所をクリック／タップしてください。</div>';
-  $('next').classList.add('hidden');stat();render();
+  $('msg').innerHTML='<div class="big">どこが重心？</div><div class="small">タップして印を置き、Guessで確定します。置き直し・ドラッグもできます。</div>';
+  $('next').classList.add('hidden');pending=null;$('guess').classList.remove('hidden');$('guess').disabled=true;stat();render();
 }
-cv.addEventListener('pointerdown',e=>{
-  if(answered)return;answered=true;
-  const r=cv.getBoundingClientRect(),g={x:(e.clientX-r.left)*S/r.width,y:(e.clientY-r.top)*S/r.height};
-  const d=Math.hypot(g.x-cent.x,g.y-cent.y),pts=Math.max(0,Math.round(100-d));
+function place(e){
+  const r=cv.getBoundingClientRect();
+  pending={x:Math.max(0,Math.min(S,(e.clientX-r.left)*S/r.width)),y:Math.max(0,Math.min(S,(e.clientY-r.top)*S/r.height))};
+  render(pending);$('guess').disabled=false;
+}
+cv.addEventListener('pointerdown',e=>{if(answered)return;cv.setPointerCapture(e.pointerId);place(e);});
+cv.addEventListener('pointermove',e=>{if(!answered&&e.buttons)place(e);});
+$('guess').onclick=()=>{
+  if(!pending||answered)return;answered=true;
+  const g=pending,d=Math.hypot(g.x-cent.x,g.y-cent.y),pts=Math.max(0,Math.round(100-d));
   total+=pts;dists.push(d);round++;render(g);stat();
   $('msg').innerHTML=`<div class="big">+${pts}点</div><div class="small">ズレ ${d.toFixed(1)} px</div>`;
+  $('guess').classList.add('hidden');
   $('next').textContent=round>=ROUNDS?'結果を見る':'次の問題';$('next').classList.remove('hidden');$('next').focus();
-});
+};
 $('next').onclick=()=>{if(round>=ROUNDS)finish();else newRound();};
 function show(id){['start','game','end'].forEach(s=>$(s).classList.toggle('hidden',s!==id));}
 function begin(){round=0;total=0;dists=[];show('game');newRound();}
